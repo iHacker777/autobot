@@ -3373,7 +3373,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 except ValueError:
                     pass
             return None
-
+        logger.info(f"[KGB] raw input for FROM‐date: {text!r}")
         dt = parse_date(text)
         if not dt:
             return await update.message.reply_text(
