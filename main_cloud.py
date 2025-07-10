@@ -166,6 +166,7 @@ async def run_kgb(update, context, alias, from_dt=None, to_dt=None):
 
 async def kgb_button(update, context):
     """CallbackQueryHandler for “Default / Custom” buttons."""
+    logger.info(f"[KGB CALLBACK] data={update.callback_query.data!r} pending_kgb(before)={pending_kgb}")
     q = update.callback_query
     await q.answer()
     # ─── DEBUG ───
@@ -3357,13 +3358,12 @@ async def run_alias(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    text = update.message.text.strip()
-    logger.info(f"[KGB] got text `{text}`, pending_kgb={pending_kgb.get(user_id)}")
-    
-        # ―― intercept KGB custom‐date flow ――
+    text    = update.message.text.strip()
+
+    # ―― 1) KGB custom‐date flow ――
     state = pending_kgb.get(user_id)
     if state:
-        # helper to try both yyyy and yy
+        # try parsing dd/mm/YYYY or dd/mm/yy
         def parse_date(s: str):
             for fmt in ("%d/%m/%Y", "%d/%m/%y"):
                 try:
@@ -3392,13 +3392,14 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         to_dt   = dt
         del pending_kgb[user_id]
         return await run_kgb(update, context, alias, from_dt, to_dt)
-        
-    # ── ► If we reach here, there was no pending KGB state ◀───────────────
+
+    # ―― 2) Only *after* we’ve given KGB a chance, catch random slashes ――
     if "/" in text:
         return await update.message.reply_text(
             "❌ No KGB operation pending. Please `/run <alias>` and tap *Custom* first.",
             parse_mode=ParseMode.MARKDOWN,
         )
+
     # ―― 0) OTP input for any worker awaiting otp_code (IDFC, etc.)
     for w in workers.values():
         if hasattr(w, "otp_code") and w.otp_code is None and not w.logged_in:
