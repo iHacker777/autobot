@@ -3381,6 +3381,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
 
         if state["stage"] == "from":
+            logger.info(f"[KGB] 📅 Got FROM‐date {text!r}, parsed → {dt!r}")
             state["from_dt"] = dt
             state["stage"]   = "to"
             return await update.message.reply_text(
