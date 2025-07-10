@@ -1433,18 +1433,21 @@ class KGBWorker(threading.Thread):
             return
 
         # ─── otherwise, spin up a fresh Chrome instance ───
+        self.profile = profile_dir
+
+        # (A) per-alias download folder under "./downloads/<alias>"
         download_root = os.path.join(os.getcwd(), "downloads", alias)
         os.makedirs(download_root, exist_ok=True)
         self.download_dir = download_root
 
         opts = webdriver.ChromeOptions()
-        opts.add_argument("--headless=new")
-        opts.add_argument("--disable-gpu")
-        opts.add_argument("window-size=1920,1080")
         opts.add_argument(f"--user-data-dir={profile_dir}")
         opts.add_argument("--start-maximized")
         opts.add_argument("--no-sandbox")
         opts.add_argument("--disable-dev-shm-usage")
+        opts.add_argument("--ignore-certificate-errors")
+        opts.add_argument("--allow-insecure-localhost")
+        opts.add_argument("--ignore-ssl-errors")
         prefs = {
             "download.default_directory": download_root,
             "download.prompt_for_download": False,
