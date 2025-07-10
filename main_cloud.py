@@ -66,6 +66,10 @@ MAX_PROFILES = 10
 BASE_PROFILE_DIR = os.path.join(os.path.expanduser("~"), "chrome-profiles")
 os.makedirs(BASE_PROFILE_DIR, exist_ok=True)
 
+# --- NEW GLOBALS for “always-up” profiles ---
+_drivers: dict[str, webdriver.Chrome] = {}    # profile_dir → Chrome instance
+_active: dict[str, bool]          = {}        # profile_dir → is alias running?
+
 # create exactly 10 empty profile dirs (you can manually sign in to each)
 PROFILE_DIRS = [
     os.path.join(BASE_PROFILE_DIR, f"profile{i}")
@@ -767,26 +771,45 @@ class IOBWorker(threading.Thread):
     Handles both IOB‐personal and IOB‐corporate.
     Suffix is determined by alias: alias.endswith('_iob') or '_iobcorp'
     """
-    def __init__(self, bot, chat_id, alias, cred, loop, profile_dir):
+    def __init__(
+        self,
+        bot,
+        chat_id,
+        alias,
+        cred,
+        loop,
+        driver: Optional[webdriver.Chrome] = None,
+        download_folder: Optional[str]      = None,
+        profile_dir: Optional[str]         = None,
+    ):
         super().__init__(daemon=True)
         self.bot          = bot
         self.chat_id      = chat_id
         self.alias        = alias
         self.cred         = cred
         self.loop         = loop
-        self.profile      = profile_dir
         self.captcha_code = None
         self.logged_in    = False
-        self.retry_count  = 0                      # ← track how many retries we've done
-        self.stop_evt     = threading.Event()      # ← signal to stop the thread
+        self.retry_count  = 0
+        self.stop_evt     = threading.Event()
 
-        # ─── (A) ─── Create a per-alias download folder (instead of the shared "./downloads") ───
+        # ─── reuse injected Chrome if provided ───
+        self.reused_driver = driver is not None
+        if self.reused_driver:
+            self.driver       = driver
+            self.download_dir = download_folder
+            self.profile      = None
+            return
+
+        # ─── otherwise, spin up a fresh Chrome instance ───
+        self.profile = profile_dir
+
+        # (A) per-alias download folder under "./downloads/<alias>"
         download_root = os.path.join(os.getcwd(), "downloads", alias)
         os.makedirs(download_root, exist_ok=True)
         self.download_dir = download_root
 
         opts = webdriver.ChromeOptions()
-        # reuse the checked-out profile so AutoBank is already logged in
         opts.add_argument(f"--user-data-dir={profile_dir}")
         opts.add_argument("--start-maximized")
         opts.add_argument("--no-sandbox")
@@ -794,7 +817,8 @@ class IOBWorker(threading.Thread):
         opts.add_argument("--ignore-certificate-errors")
         opts.add_argument("--allow-insecure-localhost")
         opts.add_argument("--ignore-ssl-errors")
-        # ─── (B) ─── Give Chrome a unique download.default_directory ───
+
+        # (B) keep your prefs for download
         prefs = {
             "download.default_directory": download_root,
             "download.prompt_for_download": False,
@@ -803,12 +827,6 @@ class IOBWorker(threading.Thread):
         opts.add_experimental_option("prefs", prefs)
 
         self.driver = webdriver.Chrome(options=opts)
-        
-        # clear cookies & cache
-        self.driver.execute_cdp_cmd('Network.clearBrowserCookies', {})
-        self.driver.execute_cdp_cmd('Network.clearBrowserCache', {})
-        self.driver.execute_script("window.localStorage.clear(); window.sessionStorage.clear();")
-
 
         
     def _send(self, text):
@@ -1215,18 +1233,21 @@ class IOBWorker(threading.Thread):
             self._send("🚪 Logging out…")
             self.driver.set_page_load_timeout(5)
             self.driver.get("https://www.iobnet.co.in/ibanking/logout.do?mode=USERCLICK")
-            self.driver.quit()
-            self.stop_evt.set()
-            profile = _profile_assignments.pop(self.alias, None)
+            # only quit if we created this browser ourselves
+            if not self.reused_driver:
+                self.driver.quit()
             self._send("✅ Logged out")
-        except:
+        except Exception:
             pass
         finally:
             self.stop_evt.set()
-            try:
-                self.driver.quit()
-            except:
-                pass
+            profile = _profile_assignments.pop(self.alias, None)
+            # only quit again if necessary
+            if not self.reused_driver:
+                try:
+                    self.driver.quit()
+                except:
+                    pass
 
     def stop(self):
         self.stop_evt.set()
@@ -1238,15 +1259,19 @@ class IOBWorker(threading.Thread):
                 self._send("✅ Logged out")
             except Exception:
                 pass
+
         try:
             self._screenshot_tabs()
         except Exception:
             pass
-        try:
-            self.driver.quit()
-        except Exception:
-            pass
-            
+
+        # only quit if we created this browser ourselves
+        if not self.reused_driver:
+            try:
+                self.driver.quit()
+            except Exception:
+                pass
+ 
 class KGBWorker(threading.Thread):
     """
     Automates Kerala Gramin Bank (KGB) login → balance check → statement download → AutoBank upload
@@ -1288,7 +1313,7 @@ class KGBWorker(threading.Thread):
             "profile.default_content_setting_values.automatic_downloads": 1,
         }
         opts.add_experimental_option("prefs", prefs)
-
+        opts.binary_location = "/opt/chrome-for-testing/chrome"
         self.driver = webdriver.Chrome(options=opts)
         # clear cookies & cache
         self.driver.execute_cdp_cmd('Network.clearBrowserCookies', {})
@@ -2850,7 +2875,40 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
-async def on_startup(app: "telegram.ext.Application") -> None:
+async def on_startup(app: Application) -> None:
+    await app.bot.delete_webhook(drop_pending_updates=True)
+
+    # 1) Launch one Chrome window per profile dir (max 10)
+    for profile in _free_profiles:   # your existing list of 10 profile-dirs
+        opts = webdriver.ChromeOptions()
+        opts.add_argument(f"--user-data-dir={profile}")
+        opts.add_argument("--no-sandbox")
+        opts.add_argument("--disable-dev-shm-usage")
+        driver = webdriver.Chrome(options=opts)
+        driver.get("https://autobank.payatom.in/operator_index.php")
+        _drivers[profile] = driver
+        _active[profile] = False
+        await app.bot.send_message(
+            chat_id=config.TELEGRAM_CHAT_ID,
+            text=f"🔐 Please log in to AutoBank now in Chrome profile:\n`{profile}`",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
+    # 2) Start a background thread to refresh inactive profiles every 10m
+    def _keep_alive_loop():
+        while True:
+            for prof, drv in _drivers.items():
+                if not _active[prof]:
+                    try:
+                        drv.switch_to.window(drv.window_handles[0])
+                        drv.refresh()
+                    except Exception:
+                        pass
+            time.sleep(600)
+    threading.Thread(target=_keep_alive_loop, daemon=True).start()
+
+    # 3) (Optional) your existing “restarted” message below…
+
     """
     This function runs immediately after `Application` has been built,
     but before it starts polling.  We use it to send our “bot restarted” message.
@@ -3088,10 +3146,29 @@ async def run_alias(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text(
             "❌ Maximum of 10 concurrent sessions reached."
         )
-
+    #NEW!
+    # 1) Reserve a profile and grab its Chrome driver
     profile = _free_profiles.pop(0)
     _profile_assignments[alias] = profile
+    driver = _drivers[profile]
+    _active[profile] = True
 
+    # 2) Collapse to a single AutoBank tab
+    main_handle = driver.window_handles[0]
+    for handle in driver.window_handles[1:]:
+        driver.switch_to.window(handle)
+        driver.close()
+    driver.switch_to.window(main_handle)
+
+    # 3) Override download folder for this alias
+    alias_folder = os.path.join(_download_base, alias)
+    os.makedirs(alias_folder, exist_ok=True)
+    driver.execute_cdp_cmd(
+        "Page.setDownloadBehavior",
+        {"behavior": "allow", "downloadPath": alias_folder}
+    )
+
+    # 4) Start the worker using the existing driver
     cred = creds[alias]
     loop = asyncio.get_running_loop()
     worker = WorkerClass(
@@ -3100,7 +3177,8 @@ async def run_alias(update: Update, context: ContextTypes.DEFAULT_TYPE):
         alias=alias,
         cred=cred,
         loop=loop,
-        profile_dir=profile,
+        driver=driver,
+        download_folder=alias_folder,
     )
     workers[alias] = worker
     worker.start()
@@ -3524,86 +3602,6 @@ async def stop_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
             _free_profiles.insert(0, profile)
 
     await update.message.reply_text("✅ All aliases have been logged out and stopped.")
-async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Telegram /report command: scrape Total Received for each MID and send back a report."""
-    chat_id = update.effective_chat.id
-    # let the user know we're working
-    await update.message.reply_text("🔄 Generating transaction report…")
-
-    def _run_report():
-        # 1) launch Chrome with Profile 10 so creds are already filled
-        opts = webdriver.ChromeOptions()
-        opts.binary_location = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
-        # point at your profile folder
-        opts.add_argument(r"--user-data-dir=C:\Users\91859\chrome-profiles\profile10")
-        # if that folder contains multiple profiles, also:
-        opts.add_argument(r"--profile-directory=Profile 10")
-        driver = webdriver.Chrome(options=opts)
-
-        try:
-            # 2) sign in (autofill + click)
-            driver.get("https://money.payatom.in/admin/admin_login.php")
-            WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((
-                    By.XPATH,
-                    "//a[contains(normalize-space(.),'SIGN IN')]"
-                ))
-            ).click()
-            WebDriverWait(driver, 10).until(
-                EC.url_contains("/admin/dashboard")
-            )
-
-            # 3) go to transactions page
-            driver.get("https://money.payatom.in/admin/transaction.php")
-
-            # 4) read MIDs from CSV
-            with open("mid.csv", newline="") as f:
-                mids = [row[0].strip() for row in csv.reader(f) if row]
-
-            results = []
-            for mid in mids:
-                # filter grid by MID
-                inp = WebDriverWait(driver, 10).until(
-                    EC.element_to_be_clickable((
-                        By.CSS_SELECTOR,
-                        "#jsGrid .jsgrid-filter-row .jsgrid-cell:nth-child(3) input"
-                    ))
-                )
-                inp.clear()
-                inp.send_keys(mid, Keys.ENTER)
-
-                # scrape “Total Received” value
-                val = WebDriverWait(driver, 10).until(
-                    EC.visibility_of_element_located((
-                        By.XPATH,
-                        "//div[.//h5[contains(.,'Total Received')]]//h3"
-                    ))
-                ).text.strip()
-
-                results.append(f"{mid} → {val}")
-
-            return results
-
-        finally:
-            driver.quit()
-
-    # run Selenium in a thread so we don't block the asyncio loop
-    import asyncio
-    try:
-        results = await asyncio.to_thread(_run_report)
-    except Exception as e:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=f"❌ /report failed: {e}"
-        )
-        return
-
-    # send the consolidated report
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text="*Transaction Report:*\n" + "\n".join(results),
-        parse_mode=ParseMode.MARKDOWN
-    )
 
     
 def main():
@@ -3630,8 +3628,7 @@ def main():
     app.add_handler(CallbackQueryHandler(kgb_button, pattern=r"^kgb\|"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
     app.add_handler(CommandHandler("add", add_alias))
-    app.add_handler(CommandHandler("stop", stop_alias))
-    app.add_handler(CommandHandler("report", report_command))       
+    app.add_handler(CommandHandler("stop", stop_alias))      
     app.add_handler(
         MessageHandler(
             filters.Regex(r"^\d{6}$") & filters.Chat(config.TELEGRAM_CHAT_ID),
