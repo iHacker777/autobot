@@ -313,31 +313,46 @@ class TMBWorker(threading.Thread):
                 continue
 
 
-    def __init__(self, bot, chat_id, alias, cred, loop, profile_dir):
+    def __init__(
+        self,
+        bot,
+        chat_id,
+        alias,
+        cred,
+        loop,
+        driver: Optional[webdriver.Chrome] = None,
+        download_folder: Optional[str]      = None,
+        profile_dir: Optional[str]         = None,
+    ):
         super().__init__(daemon=True)
-        self.bot = bot
-        self.chat_id = chat_id
-        self.alias = alias
-        self.cred = cred
-        self.loop = loop
+        self.bot          = bot
+        self.chat_id      = chat_id
+        self.alias        = alias
+        self.cred         = cred
+        self.loop         = loop
         self.captcha_code = None
-        self.logged_in = False
-        self._stop_event = threading.Event()
-        self.tmb_window = None
-        
-        # ─── (A) ─── Create a per-alias download folder (instead of the shared "./downloads") ───
+        self.logged_in    = False
+        self._stop_event  = threading.Event()
+        self.tmb_window   = None
+
+        # ─── reuse injected Chrome if provided ───
+        self.reused_driver = driver is not None
+        if self.reused_driver:
+            self.driver       = driver
+            self.download_dir = download_folder
+            return
+
+        # ─── otherwise, spin up a fresh Chrome instance ───
+        # (A) per-alias download folder under "./downloads/<alias>"
         download_root = os.path.join(os.getcwd(), "downloads", alias)
         os.makedirs(download_root, exist_ok=True)
         self.download_dir = download_root
 
         opts = webdriver.ChromeOptions()
-        # reuse the checked-out profile so AutoBank is already logged in
         opts.add_argument(f"--user-data-dir={profile_dir}")
         opts.add_argument("--start-maximized")
         opts.add_argument("--no-sandbox")
         opts.add_argument("--disable-dev-shm-usage")
-        
-        # ─── (B) ─── Give Chrome a unique download.default_directory ───
         prefs = {
             "download.default_directory": download_root,
             "download.prompt_for_download": False,
@@ -353,33 +368,59 @@ class TMBWorker(threading.Thread):
 
 
     def stop(self):
-        try:
-            # 1) switch back to the TMB tab if it still exists
-            if self.tmb_window and self.tmb_window in self.driver.window_handles:
-                self.driver.switch_to.window(self.tmb_window)
-            elif self.driver.window_handles:
-                self.driver.switch_to.window(self.driver.window_handles[0])
+        # signal the worker loop to exit
+        self._stop_event.set()
 
-            # 2) click Log Out
-            self._send_msg("🚪 Logging out…")
-            btn = WebDriverWait(self.driver, 5).until(
-                EC.element_to_be_clickable((By.LINK_TEXT, "Log Out"))
+        if self.logged_in:
+            try:
+                # switch to the TMB tab
+                if self.tmb_window in self.driver.window_handles:
+                    self.driver.switch_to.window(self.tmb_window)
+                else:
+                    self.driver.switch_to.window(self.driver.window_handles[0])
+
+                self._send("🚪 Logging out…")
+                btn = WebDriverWait(self.driver, 5).until(
+                    EC.element_to_be_clickable((By.LINK_TEXT, "Log Out"))
+                )
+                btn.click()
+
+                # wait for either logout-confirmation element
+                WebDriverWait(self.driver, 5).until(lambda d: (
+                    d.find_elements(By.ID, "HDisplay2.Re3.C2") or
+                    d.find_elements(By.XPATH, "//font[contains(text(),'You have been logged out')]")
+                ))
+
+                if self.driver.find_elements(By.ID, "HDisplay2.Re3.C2"):
+                    self._send("✅ You have successfully logged out")
+                else:
+                    self._send("✅ You have been logged out for Application Security")
+            except Exception:
+                pass
+
+        # always capture screenshots for debugging
+        try:
+            self._send_screenshots()
+        except Exception:
+            pass
+
+        if self.reused_driver:
+            # recycle the shared Chrome: open a new AutoBank tab, close all others
+            main = self.driver.window_handles[0]
+            self.driver.switch_to.window(main)
+            self.driver.execute_script(
+                "window.open('https://autobank.payatom.in/operator_index.php');"
             )
-            btn.click()
-            WebDriverWait(self.driver, 5).until(
-                EC.presence_of_element_located((By.NAME, "AuthenticationFG.USER_PRINCIPAL"))
-            )
-            self._send_msg("✅ Logged out successfully.")
-        except Exception as e:
-            # if the link isn’t found or clickable, at least warn
-            self._send_msg(f"⚠️ Logout step failed (continuing):")
-        finally:
-            # always tear down the browser and signal stop
-            self._stop_event.set()
+            for handle in self.driver.window_handles[:-1]:
+                self.driver.switch_to.window(handle)
+                self.driver.close()
+            self.driver.switch_to.window(self.driver.window_handles[0])
+        else:
             try:
                 self.driver.quit()
             except Exception:
                 pass
+
 
     def _send_msg(self, text):
         # update last‐active timestamp
@@ -424,14 +465,34 @@ class TMBWorker(threading.Thread):
 
 
     def _retry(self):
-        """Close all tabs and reopen a fresh one. Resets captcha and login state."""
-        old_tabs = set(self.driver.window_handles)
+        """Logout of TMB, then cycle to a fresh tab and reset state—no login here."""
+        try:
+            if self.tmb_window in self.driver.window_handles:
+                self.driver.switch_to.window(self.tmb_window)
+            else:
+                self.driver.switch_to.window(self.driver.window_handles[0])
 
-        # Open new tab
+            btn = WebDriverWait(self.driver, 5).until(
+                EC.element_to_be_clickable((By.LINK_TEXT, "Log Out"))
+            )
+            btn.click()
+
+            WebDriverWait(self.driver, 5).until(lambda d: (
+                d.find_elements(By.ID, "HDisplay2.Re3.C2") or
+                d.find_elements(By.XPATH, "//font[contains(text(),'You have been logged out')]")
+            ))
+
+            if self.driver.find_elements(By.ID, "HDisplay2.Re3.C2"):
+                self._send_msg("✅ You have successfully logged out")
+            else:
+                self._send_msg("✅ You have been logged out for Application Security")
+        except Exception:
+            pass
+
+        old_tabs = set(self.driver.window_handles)
         self.driver.execute_script("window.open('about:blank','_blank');")
         new_tab = (set(self.driver.window_handles) - old_tabs).pop()
 
-        # Close old tabs
         for h in old_tabs:
             try:
                 self.driver.switch_to.window(h)
@@ -439,11 +500,13 @@ class TMBWorker(threading.Thread):
             except:
                 pass
 
-        # Switch to new tab and reset state
         self.driver.switch_to.window(new_tab)
+        self.tmb_window = new_tab
+
         self.captcha_code = None
-        self.logged_in = False
-        self._send_msg(f"🔄 Retrying login…")
+        self.logged_in   = False
+        self._send_msg("🔄 Retrying login…")
+
 
     def _login(self):
         #self._send_msg("Navigating to tmbnet.in…")
@@ -1326,36 +1389,50 @@ class KGBWorker(threading.Thread):
     Automates Kerala Gramin Bank (KGB) login → balance check → statement download → AutoBank upload
     """
 
-    def __init__(self, bot, chat_id, alias, cred, loop, profile_dir):
+    def __init__(
+        self,
+        bot,
+        chat_id,
+        alias,
+        cred,
+        loop,
+        driver: Optional[webdriver.Chrome] = None,
+        download_folder: Optional[str]      = None,
+        profile_dir: Optional[str]         = None,
+    ):
         super().__init__(daemon=True)
-        self.bot        = bot
-        self.chat_id    = chat_id
-        self.alias      = alias
-        self.cred       = cred           # contains at least: {"alias": ..., "login_id": ..., "password": ..., "account_number": ...}
-        self.loop       = loop
-        self.profile    = profile_dir
-        self.captcha_code = None
-        self.logged_in  = False
-        self.stop_evt   = threading.Event()
-        self.retry_count = 0  
-        
-        # ─── (A) ─── Create a per-alias download folder (instead of the shared "./downloads") ───
+        self.bot         = bot
+        self.chat_id     = chat_id
+        self.alias       = alias
+        self.cred        = cred
+        self.loop        = loop
+        self.profile     = profile_dir
+        self.captcha_code= None
+        self.logged_in   = False
+        self.stop_evt    = threading.Event()
+        self.retry_count = 0
+
+        # ─── reuse injected Chrome if provided ───
+        self.reused_driver = driver is not None
+        if self.reused_driver:
+            self.driver       = driver
+            self.download_dir = download_folder
+            self.profile      = None
+            return
+
+        # ─── otherwise, spin up a fresh Chrome instance ───
         download_root = os.path.join(os.getcwd(), "downloads", alias)
         os.makedirs(download_root, exist_ok=True)
         self.download_dir = download_root
 
         opts = webdriver.ChromeOptions()
-        # reuse the checked-out profile so AutoBank is already logged in
         opts.add_argument("--headless=new")
-        opts.add_argument("--disable-gpu") 
+        opts.add_argument("--disable-gpu")
         opts.add_argument("window-size=1920,1080")
         opts.add_argument(f"--user-data-dir={profile_dir}")
         opts.add_argument("--start-maximized")
         opts.add_argument("--no-sandbox")
         opts.add_argument("--disable-dev-shm-usage")
-        
-
-        # ─── (B) ─── Give Chrome a unique download.default_directory ───
         prefs = {
             "download.default_directory": download_root,
             "download.prompt_for_download": False,
@@ -1363,11 +1440,14 @@ class KGBWorker(threading.Thread):
         }
         opts.add_experimental_option("prefs", prefs)
         opts.binary_location = "/opt/chrome-for-testing/chrome"
+
         self.driver = webdriver.Chrome(options=opts)
         # clear cookies & cache
         self.driver.execute_cdp_cmd('Network.clearBrowserCookies', {})
         self.driver.execute_cdp_cmd('Network.clearBrowserCache', {})
-        self.driver.execute_script("window.localStorage.clear(); window.sessionStorage.clear();")
+        self.driver.execute_script(
+            "window.localStorage.clear(); window.sessionStorage.clear();"
+        )
 
     def _retry(self):
         """Cycle to a fresh tab, close the old ones, reset state—no login here."""
@@ -2043,20 +2123,47 @@ class KGBWorker(threading.Thread):
         #self._send(f"Balance (after upload): {updated_balance}")
 
     def stop(self):
-        """Gracefully logout and quit the browser"""
-        self._logout()
+        # signal the worker to halt
+        self.stop_evt.set()
+
+        # if logged in, perform logout sequence
+        if self.logged_in:
+            try:
+                self._logout()
+            except Exception:
+                pass
+
+        # capture screenshots for diagnostics
+        try:
+            self._screenshot_tabs()
+        except Exception:
+            pass
+
+        if self.reused_driver:
+            # recycle the shared browser: open a fresh AutoBank tab, close the rest
+            self.driver.switch_to.window(self.driver.window_handles[0])
+            self.driver.execute_script(
+                "window.open('https://autobank.payatom.in/operator_index.php');"
+            )
+            for h in self.driver.window_handles[:-1]:
+                self.driver.switch_to.window(h)
+                self.driver.close()
+            self.driver.switch_to.window(self.driver.window_handles[0])
+        else:
+            try:
+                self.driver.quit()
+            except Exception:
+                pass
     
     def _logout(self):
         """
-        Step 4: Log out from KGB, quit the browser.
-                If the session expired, click “Go to Login Page” (e15) first.
+        Log out from KGB (handling session-expired pages), then quit if needed.
         """
         try:
+            self.stop_evt.set()
             self.driver.switch_to.window(self.kgb_win)
 
-            # If you get a “Session Expired” / “Application Security Error” screen:
             if "Session Expired" in self.driver.title or "Application Security Error" in self.driver.page_source:
-                # Click the “Go to Login Page” button (e15) using its onclick span:
                 WebDriverWait(self.driver, 5).until(
                     EC.element_to_be_clickable((By.XPATH,
                         "//span[contains(@onclick, 'AuthenticationController') and contains(., 'Go to Login Page')]"
@@ -2064,10 +2171,11 @@ class KGBWorker(threading.Thread):
                 ).click()
                 time.sleep(2)
 
-            # Finally click the power‐off / logout icon on the top right if present:
             try:
                 logout_icon = WebDriverWait(self.driver, 5).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, "i.power-off, a[title='Logout'], button[title='Logout']"))
+                    EC.element_to_be_clickable((By.CSS_SELECTOR,
+                        "i.power-off, a[title='Logout'], button[title='Logout']"
+                    ))
                 )
                 logout_icon.click()
             except TimeoutException:
@@ -2077,11 +2185,13 @@ class KGBWorker(threading.Thread):
         except Exception:
             pass
         finally:
+            # only quit the browser if this worker created it
+            if not getattr(self, "reused_driver", False):
+                try:
+                    self.driver.quit()
+                except:
+                    pass
             self.stop_evt.set()
-            try:
-                self.driver.quit()
-            except:
-                pass
 
 
     def _screenshot_tabs(self):
