@@ -19,6 +19,11 @@ from typing import Optional
 from telegram.ext import Application
 # Local application imports
 import config  # make sure this has TWO_CAPTCHA_API_KEY
+import os
+
+# Base folder for per-alias downloads
+_download_base = os.path.join(os.getcwd(), "downloads")
+os.makedirs(_download_base, exist_ok=True)
 
 # Third-party imports
 import requests
