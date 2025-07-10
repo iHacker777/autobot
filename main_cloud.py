@@ -93,6 +93,8 @@ from selenium.common.exceptions import (
 # Tweak Selenium’s HTTP connection pool
 RemoteConnection.pool_connections = 30
 RemoteConnection.pool_maxsize = 50
+# track users mid‐flow in the KGB custom‐date sequence
+pending_kgb: dict[int, dict] = {}
 
 # track last‐bot‐message time per alias
 last_active: dict[str, datetime] = {}
@@ -123,8 +125,7 @@ _profile_assignments = {}                  # alias -> profile-dir
 
 # ─── after your existing “from telegram.ext import …” block ───
 
-# track users mid‐flow in the KGB custom‐date sequence
-pending_kgb: dict[int, dict] = {}
+
 
 async def run_kgb(update, context, alias, from_dt=None, to_dt=None):
     """Start a KGBWorker, attaching from/to if provided."""
@@ -3357,6 +3358,7 @@ async def run_alias(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"[KGB TEXT ENTRY] hit handle_text_message, pending_kgb global is {pending_kgb}")    
     user_id = update.effective_user.id
     text    = update.message.text.strip()
 
