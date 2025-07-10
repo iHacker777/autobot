@@ -168,6 +168,9 @@ async def kgb_button(update, context):
     """CallbackQueryHandler for “Default / Custom” buttons."""
     q = update.callback_query
     await q.answer()
+    # ─── DEBUG ───
+    logger.info(f"[KGB CALLBACK] data={q.data!r} pending_kgb(before)={pending_kgb}")
+    
     _, alias, choice = q.data.split("|")
     user_id = update.effective_user.id
 
@@ -177,6 +180,9 @@ async def kgb_button(update, context):
 
     # custom branch → start asking dates
     pending_kgb[user_id] = {"alias": alias, "stage": "from"}
+    # ─── DEBUG ───
+    logger.info(f"[KGB CALLBACK] set pending_kgb[{user_id}]={pending_kgb[user_id]}")
+    
     await q.message.reply_text(
         "✏️ Enter *FROM* date (dd/mm/yyyy or dd/mm/yy):",
         parse_mode=ParseMode.MARKDOWN,
