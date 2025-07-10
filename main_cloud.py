@@ -15,6 +15,7 @@ import traceback
 from datetime import date, datetime, timedelta
 from io import BytesIO
 from urllib.parse import urljoin
+from typing import Optional
 
 # Local application imports
 import config  # make sure this has TWO_CAPTCHA_API_KEY
