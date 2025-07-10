@@ -3392,7 +3392,13 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         to_dt   = dt
         del pending_kgb[user_id]
         return await run_kgb(update, context, alias, from_dt, to_dt)
-
+        
+    # ── ► If we reach here, there was no pending KGB state ◀───────────────
+    if "/" in text:
+        return await update.message.reply_text(
+            "❌ No KGB operation pending. Please `/run <alias>` and tap *Custom* first.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
     # ―― 0) OTP input for any worker awaiting otp_code (IDFC, etc.)
     for w in workers.values():
         if hasattr(w, "otp_code") and w.otp_code is None and not w.logged_in:
