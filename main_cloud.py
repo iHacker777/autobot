@@ -13,6 +13,7 @@ import threading
 import time
 import traceback
 from datetime import date, datetime, timedelta
+
 from io import BytesIO
 from urllib.parse import urljoin
 from typing import Optional
@@ -3351,6 +3352,8 @@ async def run_alias(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
+    logger.info(f"[KGB] got text `{text}`, pending_kgb={pending_kgb.get(user_id)}")
+    
         # ―― intercept KGB custom‐date flow ――
     state = pending_kgb.get(user_id)
     if state:
