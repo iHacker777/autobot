@@ -24,6 +24,38 @@ import os
 # Base folder for per-alias downloads
 _download_base = os.path.join(os.getcwd(), "downloads")
 os.makedirs(_download_base, exist_ok=True)
+import logging
+
+# ─── set up root logger ───
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+# ─── define a filter to drop HTTP OK messages ───
+class ExcludeHttpOkFilter(logging.Filter):
+    def filter(self, record):
+        msg = record.getMessage()
+        return "HTTP Request:" not in msg or "200 OK" not in msg
+
+# ─── file handler ───
+file_handler = logging.FileHandler("autobot.log", encoding="utf-8")
+file_handler.setLevel(logging.INFO)
+file_handler.addFilter(ExcludeHttpOkFilter())
+file_handler.setFormatter(logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(name)s %(module)s:%(lineno)d — %(message)s"
+))
+
+# ─── console handler (optional) ───
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_handler.setFormatter(logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(name)s — %(message)s"
+))
+
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
+
+# ─── silence httpx INFO-level “HTTP Request” logs ───
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # Third-party imports
 import requests
@@ -1271,8 +1303,19 @@ class IOBWorker(threading.Thread):
         except Exception:
             pass
 
-        # only quit if we created this browser ourselves
-        if not self.reused_driver:
+        if self.reused_driver:
+            # open a fresh AutoBank tab and close all others
+            self.driver.switch_to.window(self.driver.window_handles[0])
+            self.driver.execute_script(
+                "window.open('https://autobank.payatom.in/operator_index.php');"
+            )
+            # close every tab except the new one
+            for handle in self.driver.window_handles[:-1]:
+                self.driver.switch_to.window(handle)
+                self.driver.close()
+            # switch to the remaining AutoBank tab
+            self.driver.switch_to.window(self.driver.window_handles[0])
+        else:
             try:
                 self.driver.quit()
             except Exception:
@@ -2905,6 +2948,7 @@ async def on_startup(app: Application) -> None:
         while True:
             for prof, drv in _drivers.items():
                 if not _active[prof]:
+                    print(f"[KeepAlive] refreshing profile {prof}") 
                     try:
                         drv.switch_to.window(drv.window_handles[0])
                         drv.refresh()
