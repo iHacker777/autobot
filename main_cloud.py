@@ -162,7 +162,10 @@ async def run_kgb(update, context, alias, from_dt=None, to_dt=None):
     msg = f"Started *{alias}*"
     if from_dt:
         msg += f" from {from_dt.strftime('%d/%m/%Y')} to {to_dt.strftime('%d/%m/%Y')}"
-    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+    # …
+    # figure out the correct message object
+    msg_obj = update.message or update.callback_query.message
+    await msg_obj.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
 
 async def kgb_button(update, context):
@@ -1448,7 +1451,7 @@ class KGBWorker(threading.Thread):
             "profile.default_content_setting_values.automatic_downloads": 1,
         }
         opts.add_experimental_option("prefs", prefs)
-        opts.binary_location = "/opt/chrome-for-testing/chrome"
+        #opts.binary_location = "/opt/chrome-for-testing/chrome" ->This fuckup took 4 hours of my time !
 
         self.driver = webdriver.Chrome(options=opts)
         # clear cookies & cache
