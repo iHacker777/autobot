@@ -1413,16 +1413,15 @@ class KGBWorker(threading.Thread):
         profile_dir: Optional[str]         = None,
     ):
         super().__init__(daemon=True)
-        self.bot         = bot
-        self.chat_id     = chat_id
-        self.alias       = alias
-        self.cred        = cred
-        self.loop        = loop
-        self.profile     = profile_dir
-        self.captcha_code= None
-        self.logged_in   = False
-        self.stop_evt    = threading.Event()
-        self.retry_count = 0
+        self.bot          = bot
+        self.chat_id      = chat_id
+        self.alias        = alias
+        self.cred         = cred
+        self.loop         = loop
+        self.captcha_code = None
+        self.logged_in    = False
+        self.retry_count  = 0
+        self.stop_evt     = threading.Event()
 
         # ─── reuse injected Chrome if provided ───
         self.reused_driver = driver is not None
@@ -1448,21 +1447,16 @@ class KGBWorker(threading.Thread):
         opts.add_argument("--ignore-certificate-errors")
         opts.add_argument("--allow-insecure-localhost")
         opts.add_argument("--ignore-ssl-errors")
+
+        # (B) keep your prefs for download
         prefs = {
             "download.default_directory": download_root,
             "download.prompt_for_download": False,
             "profile.default_content_setting_values.automatic_downloads": 1,
         }
         opts.add_experimental_option("prefs", prefs)
-        #opts.binary_location = "/opt/chrome-for-testing/chrome" ->This fuckup took 4 hours of my time !
 
         self.driver = webdriver.Chrome(options=opts)
-        # clear cookies & cache
-        self.driver.execute_cdp_cmd('Network.clearBrowserCookies', {})
-        self.driver.execute_cdp_cmd('Network.clearBrowserCache', {})
-        self.driver.execute_script(
-            "window.localStorage.clear(); window.sessionStorage.clear();"
-        )
 
     def _retry(self):
         """Cycle to a fresh tab, close the old ones, reset state—no login here."""
