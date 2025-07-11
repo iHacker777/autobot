@@ -1040,13 +1040,13 @@ class IOBWorker(threading.Thread):
         self.driver.get("https://www.iobnet.co.in/ibanking/html/index.html")
 
         # 2) Click “Continue to Internet Banking Home Page”
-        WebDriverWait(self.driver, 10).until(
+        WebDriverWait(self.driver, 20).until(
             EC.element_to_be_clickable((By.LINK_TEXT, "Continue to Internet Banking Home Page"))
         ).click()
 
         # 3) Choose personal vs corporate
         role_text = "Corporate Login" if self.alias.endswith("_iobcorp") else "Personal Login"
-        WebDriverWait(self.driver, 10).until(
+        WebDriverWait(self.driver, 20).until(
             EC.element_to_be_clickable((By.LINK_TEXT, role_text))
         ).click()
 
@@ -1060,7 +1060,7 @@ class IOBWorker(threading.Thread):
             self.driver.find_element(By.NAME, "password").send_keys(self.cred["password"])
 
         # 5) Grab the captcha image & send it to Telegram
-        img = WebDriverWait(self.driver, 10).until(
+        img = WebDriverWait(self.driver, 20).until(
             EC.presence_of_element_located((By.ID, "captchaimg"))
         )
         bio = BytesIO(img.screenshot_as_png)
@@ -1168,16 +1168,16 @@ class IOBWorker(threading.Thread):
         )
         self.driver.execute_script("arguments[0].scrollIntoView(true);", view_btn)
         view_btn.click()
-
+        time.sleep(10)
         # 7) Wait for the CSV export button to appear, scroll to it…
-        csv_btn = WebDriverWait(self.driver, 20).until(
+        csv_btn = WebDriverWait(self.driver, 30).until(
             EC.element_to_be_clickable((By.ID, "accountstatement_csvAcctStmt"))
         )
         # a) scroll so it’s roughly centered (avoids sticky headers)
         self.driver.execute_script(
             "arguments[0].scrollIntoView({block:'center'});", csv_btn
         )
-        time.sleep(0.3)  # give any animations a moment
+        time.sleep(5)  # give any animations a moment
 
         # b) try the normal click, but if it’s still intercepted, do a JS click
         try:
