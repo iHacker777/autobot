@@ -181,6 +181,8 @@ async def kgb_button(update, context):
 
     if choice == "default":
         # fire off the normal logic
+        # ─── DEBUG ───
+        logger.info(f"[KGB DEFAULT CALLBACK] data={q.data!r} pending_kgb(before)={pending_kgb}")
         return await run_kgb(update, context, alias)
 
     # custom branch → start asking dates
