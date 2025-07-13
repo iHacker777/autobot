@@ -93,8 +93,7 @@ from selenium.common.exceptions import (
 # Tweak Selenium’s HTTP connection pool
 RemoteConnection.pool_connections = 30
 RemoteConnection.pool_maxsize = 50
-# track users mid‐flow in the KGB custom‐date sequence
-pending_kgb: dict[int, dict] = {}
+
 
 # track last‐bot‐message time per alias
 last_active: dict[str, datetime] = {}
@@ -125,24 +124,28 @@ _profile_assignments = {}                  # alias -> profile-dir
 
 # ─── after your existing “from telegram.ext import …” block ───
 
-
+# track users mid‐flow in the KGB custom‐date sequence
+pending_kgb: dict[int, dict] = {}
 
 async def run_kgb(update, context, alias, from_dt=None, to_dt=None):
-    """Start a KGBWorker, attaching from/to if provided."""
-    # your existing pre‐checks:
+    """Start a KGBWorker, attaching custom from/to dates if provided."""
+    # pre‐checks
+    msg_target = update.message or update.callback_query.message
     if alias not in creds:
-        return await update.message.reply_text(f"❌ Unknown alias “{alias}”.")
+        return await msg_target.reply_text(f"❌ Unknown alias “{alias}”.")
     if alias in _profile_assignments:
-        return await update.message.reply_text(f"❌ Already running “{alias}”.")
+        return await msg_target.reply_text(f"❌ Already running “{alias}”.")
     if not _free_profiles:
-        return await update.message.reply_text(
+        return await msg_target.reply_text(
             "❌ Maximum of 10 concurrent sessions reached."
         )
 
+    # reserve credentials and profile
     cred = creds[alias]
     profile = _free_profiles.pop(0)
     _profile_assignments[alias] = profile
 
+    # spin up the worker
     worker = KGBWorker(
         bot=context.bot,
         chat_id=update.effective_chat.id,
@@ -151,50 +154,41 @@ async def run_kgb(update, context, alias, from_dt=None, to_dt=None):
         loop=asyncio.get_running_loop(),
         profile_dir=profile,
     )
+
     # attach custom dates if given
     if from_dt and to_dt:
         worker.from_dt = from_dt
         worker.to_dt   = to_dt
 
+    # start and record
     workers[alias] = worker
     worker.start()
 
+    # build and send reply
     msg = f"Started *{alias}*"
     if from_dt:
         msg += f" from {from_dt.strftime('%d/%m/%Y')} to {to_dt.strftime('%d/%m/%Y')}"
-    # …
-    # figure out the correct message object
-    msg_obj = update.message or update.callback_query.message
-    await msg_obj.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+    await msg_target.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
 
 async def kgb_button(update, context):
     """CallbackQueryHandler for “Default / Custom” buttons."""
-    logger.info(f"[KGB CALLBACK] data={update.callback_query.data!r} pending_kgb(before)={pending_kgb}")
     q = update.callback_query
     await q.answer()
-    # ─── DEBUG ───
-    logger.info(f"[KGB CALLBACK] data={q.data!r} pending_kgb(before)={pending_kgb}")
-    
     _, alias, choice = q.data.split("|")
     user_id = update.effective_user.id
 
     if choice == "default":
         # fire off the normal logic
-        # ─── DEBUG ───
-        logger.info(f"[KGB DEFAULT CALLBACK] data={q.data!r} pending_kgb(before)={pending_kgb}")
         return await run_kgb(update, context, alias)
 
     # custom branch → start asking dates
     pending_kgb[user_id] = {"alias": alias, "stage": "from"}
-    # ─── DEBUG ───
-    logger.info(f"[KGB CALLBACK] set pending_kgb[{user_id}]={pending_kgb[user_id]}")
-    
     await q.message.reply_text(
         "✏️ Enter *FROM* date (dd/mm/yyyy or dd/mm/yy):",
         parse_mode=ParseMode.MARKDOWN,
     )
-
+    
 def solve_captcha_with_2captcha(image_bytes, min_len=None, max_len=None, regsense=True):
     try:
         b64_image = base64.b64encode(image_bytes).decode('utf-8')
