@@ -128,48 +128,48 @@ _profile_assignments = {}                  # alias -> profile-dir
 pending_kgb: dict[int, dict] = {}
 
 async def run_kgb(update, context, alias, from_dt=None, to_dt=None):
-    """Start a KGBWorker, attaching custom from/to dates if provided."""
-    # pre‐checks
+    """Start a KGBWorker by reusing a pre-warmed Chrome driver."""
     msg_target = update.message or update.callback_query.message
+
+    # pre-checks
     if alias not in creds:
         return await msg_target.reply_text(f"❌ Unknown alias “{alias}”.")
     if alias in _profile_assignments:
         return await msg_target.reply_text(f"❌ Already running “{alias}”.")
     if not _free_profiles:
-        return await msg_target.reply_text(
-            "❌ Maximum of 10 concurrent sessions reached."
-        )
+        return await msg_target.reply_text("❌ Maximum of 10 concurrent sessions reached.")
 
     # reserve credentials and profile
-    cred = creds[alias]
+    cred    = creds[alias]
     profile = _free_profiles.pop(0)
+    driver  = _drivers[profile]
+    _active[profile]            = True
     _profile_assignments[alias] = profile
 
-    # spin up the worker
+    # spawn the worker with the existing driver
     worker = KGBWorker(
         bot=context.bot,
         chat_id=update.effective_chat.id,
         alias=alias,
         cred=cred,
         loop=asyncio.get_running_loop(),
+        driver=driver,
         profile_dir=profile,
     )
 
-    # attach custom dates if given
+    # attach custom dates if provided
     if from_dt and to_dt:
         worker.from_dt = from_dt
         worker.to_dt   = to_dt
 
-    # start and record
     workers[alias] = worker
     worker.start()
 
-    # build and send reply
+    # notify user
     msg = f"Started *{alias}*"
     if from_dt:
         msg += f" from {from_dt.strftime('%d/%m/%Y')} to {to_dt.strftime('%d/%m/%Y')}"
     await msg_target.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
-
 
 async def kgb_button(update, context):
     """CallbackQueryHandler for “Default / Custom” buttons."""
