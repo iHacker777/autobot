@@ -3079,33 +3079,35 @@ async def on_startup(app: Application) -> None:
     but before it starts polling.  We use it to send our “bot restarted” message.
     """
     await app.bot.delete_webhook(drop_pending_updates=True)
-    
     await app.bot.send_message(
-        chat_id=config.TELEGRAM_CHAT_ID,
-        parse_mode=ParseMode.MARKDOWN,
-        text="""🚨 *Attention!*
-    AutoBot has been restarted, and all operations have been reset.
-    • Please re-run your automations.
-    • Contact the administrator for more information.
-    
-    ⚠️ *New: CAPTCHA Auto-Solving via 2Captcha*🤖
-    • AutoBot now tries to solve image captchas automatically using 2Captcha.
-    • If it fails, the CAPTCHA is sent to Telegram for manual solving.
-    • IOB captchas are forced to uppercase and restricted to exactly 6 characters for better accuracy.
-    • Incorrect solutions are automatically reported for refund.
+    chat_id=config.TELEGRAM_CHAT_ID,
+    parse_mode=ParseMode.MARKDOWN,
+    text="""🎉 *We’ve Moved to the Cloud!*
+AutoBot is now running on a faster, more reliable cloud platform.
 
-    No changes needed on your part. Just run `/run <alias>` as usual :)
-    
-    ⚠️ *Update: IDBI Bank Integration*
-    AutoBot now supports _IDBI Bank_.
-    To run IDBI automations, use:
-    `/run <alias>_idbi`
+🤖 *Bot Restarted & All Aliases Stopped*
+• All operations have been reset.
+• Please restart any aliases you need with `/run <alias>`.
 
-    ⚠️ *Update: IDFC Bank Integration*
-    AutoBot now supports _IDFC Bank_.
-    To run IDFC automations, use:
-    `/run <alias>_idfc`"""
-    )
+⚡ *What’s New?*
+• Faster responses
+• Rock-solid stability
+• Zero-downtime automatic updates
+
+🔄 *2Captcha Auto-Solving is Live*🤖
+• Image captchas auto-solved via 2Captcha.
+• If solving fails, captchas are sent to Telegram for manual input.
+• IOB captchas forced to UPPERCASE (6 characters only).
+• Incorrect solutions auto-reported for refund.
+
+🏦 *IDFC Bank Integration: Fully Operational*
+Run `/run <alias>_idfc` to start.
+
+🚨 *IDBI Services are CURRENTLY INOP* 🚨
+We’re working round-the-clock to restore access ASAP.
+
+Thank you for your patience and continued trust!"""
+)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
