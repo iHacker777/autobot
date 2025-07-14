@@ -3607,6 +3607,7 @@ async def file_alias(update: Update, context: ContextTypes.DEFAULT_TYPE):
     alias = context.args[0] if context.args else None
     if not alias:
         return await update.message.reply_text("Usage: /file <alias>")
+
     if alias not in creds:
         return await update.message.reply_text(f"❌ Unknown alias “{alias}”.")
 
@@ -3617,73 +3618,22 @@ async def file_alias(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not files:
             return await update.message.reply_text(f"No files for `{alias}` yet.")
         latest = max(files, key=os.path.getctime)
-        return await context.bot.send_document(
-            chat_id=update.effective_chat.id,
-            document=open(latest, "rb"),
-            filename=os.path.basename(latest)
-        )
 
-    # 3️⃣ Otherwise reserve a profile
-    if not _free_profiles:
-        return await update.message.reply_text("❌ No free Chrome profiles.")
-    profile = _free_profiles.pop(0)
-    _profile_assignments[alias] = profile
-
-    # pick worker class based on suffix
-    WorkerClass = next(
-        (Cls for suf, Cls in _WORKER_CLASSES.items() if alias.endswith(f"_{suf}")),
-        None
-    )
-    if not WorkerClass:
-        _free_profiles.insert(0, profile)
-        _profile_assignments.pop(alias, None)
-        return await update.message.reply_text("❌ Alias must end in a valid suffix.")
-
-    # 4️⃣ Capture the running loop & background task
-    main_loop = asyncio.get_running_loop()
-    def run_once():
-        w = WorkerClass(
-            bot=context.bot,
-            chat_id=update.effective_chat.id,
-            alias=alias,
-            cred=creds[alias],
-            loop=main_loop,
-            profile_dir=profile
-        )
-        # Register this worker so your captcha-handler can inject the code
-        workers[alias] = w  # ← ensures handle_captcha_reply sees it :contentReference[oaicite:0]{index=0}
-        try:
-            w._login()
-            # hijack upload → Telegram
-            w._upload_to_autobank = lambda path: asyncio.run_coroutine_threadsafe(
-                context.bot.send_document(
-                    chat_id=update.effective_chat.id,
-                    document=open(path, "rb"),
-                    filename=os.path.basename(path)
-                ),
-                main_loop
+        # Always use 'with' so the file handle gets closed
+        with open(latest, "rb") as fp:
+            return await context.bot.send_document(
+                chat_id=update.effective_chat.id,
+                document=fp,
+                filename=os.path.basename(latest)
             )
-            w._balance_and_pages_and_download()
-        except Exception as e:
-            asyncio.run_coroutine_threadsafe(
-                context.bot.send_message(
-                    chat_id=update.effective_chat.id,
-                    text=f"[{alias}] ❌ Error in /file: {e}"
-                ),
-                main_loop
-            )
-        finally:
-            # Always stop, clean up, and unregister
-            w.stop()
-            workers.pop(alias, None)
-            _profile_assignments.pop(alias, None)
-            _free_profiles.insert(0, profile)
 
-    asyncio.create_task(asyncio.to_thread(run_once))
-    await update.message.reply_text(
-        f"🗂 Fetching one-time statement for *{alias}*…",
-        parse_mode=ParseMode.MARKDOWN
+    # 3️⃣ Not running → tell them what to do
+    # Turn that redundant second `if alias not in _profile_assignments:` into an else
+    # Also: prefix the string with f so {alias} actually gets interpolated
+    return await update.message.reply_text(
+        f"❌ Alias `{alias}` is not running. Please run /run {alias} to start fetching."
     )
+
 
 
 
