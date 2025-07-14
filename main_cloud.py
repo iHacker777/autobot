@@ -3081,9 +3081,6 @@ async def on_startup(app: Application) -> None:
     await app.bot.delete_webhook(drop_pending_updates=True)
     
     await app.bot.send_message(
-        chat_id=config.TELEGRAM_CHAT_ID,
-        parse_mode=ParseMode.MARKDOWN,
-    await app.bot.send_message(
     chat_id=config.TELEGRAM_CHAT_ID,
     parse_mode=ParseMode.MARKDOWN,
     text="""🎉 *We’ve Moved to the Cloud!*
