@@ -1225,7 +1225,7 @@ class IOBWorker(threading.Thread):
                     pass  # already logged in
 
                 # 9c) Wait for dashboard sidebar
-                WebDriverWait(self.driver, 20).until(
+                WebDriverWait(self.driver, 60).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, "nav.sidebar"))
                 )
 
@@ -1236,11 +1236,11 @@ class IOBWorker(threading.Thread):
                 )
 
                 # 9e) Fill form
-                Select(WebDriverWait(self.driver, 10).until(
+                Select(WebDriverWait(self.driver, 60).until(
                     EC.presence_of_element_located((By.ID, "bank"))
                 )).select_by_visible_text("IOB")
 
-                acct_field = WebDriverWait(self.driver, 10).until(
+                acct_field = WebDriverWait(self.driver, 60).until(
                     EC.element_to_be_clickable((By.ID, "account_number"))
                 )
                 acct_field.clear()
@@ -3079,6 +3079,10 @@ async def on_startup(app: Application) -> None:
     but before it starts polling.  We use it to send our “bot restarted” message.
     """
     await app.bot.delete_webhook(drop_pending_updates=True)
+    
+    await app.bot.send_message(
+        chat_id=config.TELEGRAM_CHAT_ID,
+        parse_mode=ParseMode.MARKDOWN,
     await app.bot.send_message(
     chat_id=config.TELEGRAM_CHAT_ID,
     parse_mode=ParseMode.MARKDOWN,
