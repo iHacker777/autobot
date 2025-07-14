@@ -3613,19 +3613,19 @@ async def file_alias(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 2️⃣ If already running, just grab latest download
     if alias in _profile_assignments:
-        dl_dir = os.path.join("downloads", alias)
+        # instead of "downloads/…", build the full ~/autobot/downloads path
+        dl_dir = os.path.expanduser(f"~/autobot/downloads/{alias}")
         files = glob.glob(os.path.join(dl_dir, "*"))
         if not files:
             return await update.message.reply_text(f"No files for `{alias}` yet.")
         latest = max(files, key=os.path.getctime)
-
-        # Always use 'with' so the file handle gets closed
         with open(latest, "rb") as fp:
             return await context.bot.send_document(
                 chat_id=update.effective_chat.id,
                 document=fp,
-                filename=os.path.basename(latest)
+                filename=os.path.basename(latest),
             )
+
 
     # 3️⃣ Not running → tell them what to do
     # Turn that redundant second `if alias not in _profile_assignments:` into an else
