@@ -147,25 +147,22 @@ async def run_kgb(update, context, alias, from_dt=None, to_dt=None):
     _profile_assignments[alias] = profile
 
     # spawn the worker with the existing driver
+    alias_folder = os.path.join(_download_base, alias)
+    os.makedirs(alias_folder, exist_ok=True)
+
+    # 1) Pass download_folder into the worker
     worker = KGBWorker(
-        bot=context.bot,
-        chat_id=update.effective_chat.id,
+        bot=…,
+        chat_id=…,
         alias=alias,
         cred=cred,
-        loop=asyncio.get_running_loop(),
+        loop=…,
         driver=driver,
+        download_folder=alias_folder,   # ← now the worker knows its dir
         profile_dir=profile,
     )
 
-    # attach custom dates if provided
-    if from_dt and to_dt:
-        worker.from_dt = from_dt
-        worker.to_dt   = to_dt
-        
-    # 3) Override download folder for this alias
-    alias_folder = os.path.join(_download_base, alias)
-    os.makedirs(alias_folder, exist_ok=True)
-    # ── updated code ──
+    # 2) Then *also* tell Chrome where to dump files
     driver.execute_cdp_cmd(
         "Browser.setDownloadBehavior",
         {
@@ -173,11 +170,17 @@ async def run_kgb(update, context, alias, from_dt=None, to_dt=None):
             "downloadPath": os.path.abspath(alias_folder)
         }
     )
+
+    # attach custom dates if provided
+    if from_dt and to_dt:
+        worker.from_dt = from_dt
+        worker.to_dt   = to_dt
+
     workers[alias] = worker
     worker.start()
 
     # notify user
-    msg = f"Started *{alias}*"
+    msg = f"Started *{alias}* in profile *{profile}*"
     if from_dt:
         msg += f" from {from_dt.strftime('%d/%m/%Y')} to {to_dt.strftime('%d/%m/%Y')}"
     await msg_target.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
