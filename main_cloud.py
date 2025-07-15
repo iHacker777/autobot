@@ -26,7 +26,7 @@ import os
 _download_base = os.path.join(os.getcwd(), "downloads")
 # Map profile_dir → its dedicated download folder
 _profile_downloads: dict[str, str] = {}
- os.makedirs(_download_base, exist_ok=True)
+os.makedirs(_download_base, exist_ok=True)
 
 import logging
 # ─── set up root logger ───
