@@ -161,7 +161,18 @@ async def run_kgb(update, context, alias, from_dt=None, to_dt=None):
     if from_dt and to_dt:
         worker.from_dt = from_dt
         worker.to_dt   = to_dt
-
+        
+    # 3) Override download folder for this alias
+    alias_folder = os.path.join(_download_base, alias)
+    os.makedirs(alias_folder, exist_ok=True)
+    # ── updated code ──
+    driver.execute_cdp_cmd(
+        "Browser.setDownloadBehavior",
+        {
+            "behavior":     "allow",
+            "downloadPath": os.path.abspath(alias_folder)
+        }
+    )
     workers[alias] = worker
     worker.start()
 
@@ -1425,14 +1436,7 @@ class KGBWorker(threading.Thread):
             self.driver       = driver
             self.download_dir = download_folder
             self.profile      = None
-            # ─── NEW: tell Chromium where to dump files ───
-            self.driver.execute_cdp_cmd(
-                "Browser.setDownloadBehavior",
-                {
-                    "behavior":     "allow",  
-                    "downloadPath": os.path.abspath(self.download_dir)
-                }
-            )     
+   
             return
 
         # ─── otherwise, spin up a fresh Chrome instance ───
