@@ -3064,7 +3064,6 @@ async def on_startup(app: Application) -> None:
         opts.add_argument(f"--user-data-dir={profile}")
         opts.add_argument("--no-sandbox")
         opts.add_argument("--disable-dev-shm-usage")
-        opts.add_argument("--incognito")
                 # (B) keep your prefs for download
         prefs = {
             "download.prompt_for_download": False,
