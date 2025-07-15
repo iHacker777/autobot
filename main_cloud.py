@@ -1830,46 +1830,53 @@ class KGBWorker(threading.Thread):
         # ─── small pagination‐fix: if “1 – 5 of 500” then jump to page 101 ───
         # … after your SEARCH click, before STEP 1 …
 
-        try:
-            status_label = WebDriverWait(self.driver, 5).until(
-                EC.presence_of_element_located((
-                    By.CSS_SELECTOR,
-                    "span.text.pagination-status label.simple-text.pagination-status"
-                ))
-            )
-        except TimeoutException:
-            # pagination status not present → skip our 500-check entirely
-            pass
-        else:
-            if "of 500" in status_label.text:
-                self._send(
-                    "Notice: Transaction count exceeds 500. Automatically navigating to page 101 to retrieve remaining entries."
-                )
-
-                # enter page 101
-                page_input = WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((
-                        By.ID,
-                        "PageConfigurationMaster_RXACBSW__1:TransactionHistoryFG.OpTransactionListing_REQUESTED_PAGE_NUMBER"
-                    ))
-                )
-                page_input.clear()
-                page_input.send_keys("101")
-
-                # click the “GO” button
-                go_btn = WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable((
-                        By.ID,
-                        "PageConfigurationMaster_RXACBSW__1:Action.OpTransactionListing.GOTO_PAGE__"
-                    ))
-                )
-                self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", go_btn)
-                go_btn.click()
-                time.sleep(30)
+#        try:
+#            status_label = WebDriverWait(self.driver, 5).until(
+#                EC.presence_of_element_located((
+#                    By.CSS_SELECTOR,
+#                    "span.text.pagination-status label.simple-text.pagination-status"
+#                ))
+#            )
+#        except TimeoutException:
+#            # pagination status not present → skip our 500-check entirely
+ #           pass
+ #       else:
+  #          if "of 500" in status_label.text:
+   #             self._send(
+    #                "Notice: Transaction count exceeds 500. Automatically navigating to page 101 to retrieve remaining entries."
+     #           )
+#
+ #               # enter page 101
+  #              page_input = WebDriverWait(self.driver, 10).until(
+   #                 EC.presence_of_element_located((
+    #                    By.ID,
+     #                   "PageConfigurationMaster_RXACBSW__1:TransactionHistoryFG.OpTransactionListing_REQUESTED_PAGE_NUMBER"
+      #              ))
+       #         )
+        #        page_input.clear()
+         #       page_input.send_keys("101")
+#
+ #               # click the “GO” button
+  #              go_btn = WebDriverWait(self.driver, 10).until(
+   #                 EC.element_to_be_clickable((
+    #                    By.ID,
+     #                   "PageConfigurationMaster_RXACBSW__1:Action.OpTransactionListing.GOTO_PAGE__"
+      #              ))
+       #         )
+        #        self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", go_btn)
+         #       go_btn.click()
+          #      time.sleep(30)
         # ─── STEP 1: after clicking SEARCH, take a screenshot & dump dropdown-wrapper HTML ───
         #self.driver.save_screenshot("step1_search.png")
         #print("STEP 1: Screenshot saved as step1_search.png")
-
+        # THIS is the magic that actually routes downloads without a dialog:
+        driver.execute_cdp_cmd(
+            "Page.setDownloadBehavior",
+            {
+                "behavior": "allow",        # allow all downloads
+                "downloadPath": download_folder 
+            }
+        )
         # Wait for the hidden <select> to exist (so we know the widget is rendered):
         WebDriverWait(self.driver, 60).until(
             EC.presence_of_element_located(
