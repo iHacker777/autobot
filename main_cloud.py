@@ -3032,7 +3032,6 @@ async def on_startup(app: Application) -> None:
         opts.add_argument(f"--user-data-dir={profile}")
         opts.add_argument("--no-sandbox")
         opts.add_argument("--disable-dev-shm-usage")
-        opts.add_argument("--incognito")
         driver = webdriver.Chrome(options=opts)
 
         # c) instruct Chrome to dump all downloads into our profile folder
