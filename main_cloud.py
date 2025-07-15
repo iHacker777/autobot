@@ -1425,12 +1425,15 @@ class KGBWorker(threading.Thread):
             self.driver       = driver
             self.download_dir = download_folder
             self.profile      = None
-            # ───────────── ADD THIS ─────────────
+            # ─── NEW: tell Chromium where to dump files ───
             self.driver.execute_cdp_cmd(
-                "Page.setDownloadBehavior",
-                {"behavior": "allow", "downloadPath": self.download_dir}
-            )
-            # ─────────────────────────────────────            
+                "Browser.setDownloadBehavior",
+                {
+                    "behavior":     "allow",
+                    "downloadPath": self.download_dir,
+                    "eventsEnabled": False
+                }
+            )      
             return
 
         # ─── otherwise, spin up a fresh Chrome instance ───
