@@ -152,11 +152,11 @@ async def run_kgb(update, context, alias, from_dt=None, to_dt=None):
 
     # 1) Pass download_folder into the worker
     worker = KGBWorker(
-        bot=…,
-        chat_id=…,
+        bot=context.bot,
+        chat_id=update.effective_chat.id,
         alias=alias,
         cred=cred,
-        loop=…,
+        loop=asyncio.get_running_loop(),
         driver=driver,
         download_folder=alias_folder,   # ← now the worker knows its dir
         profile_dir=profile,
