@@ -1429,11 +1429,10 @@ class KGBWorker(threading.Thread):
             self.driver.execute_cdp_cmd(
                 "Browser.setDownloadBehavior",
                 {
-                    "behavior":     "allow",
-                    "downloadPath": self.download_dir,
-                    "eventsEnabled": False
+                    "behavior":     "allow",  
+                    "downloadPath": os.path.abspath(self.download_dir)
                 }
-            )      
+            )     
             return
 
         # ─── otherwise, spin up a fresh Chrome instance ───
