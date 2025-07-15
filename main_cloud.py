@@ -24,9 +24,11 @@ import os
 
 # Base folder for per-alias downloads
 _download_base = os.path.join(os.getcwd(), "downloads")
-os.makedirs(_download_base, exist_ok=True)
-import logging
+# Map profile_dir → its dedicated download folder
+_profile_downloads: dict[str, str] = {}
+ os.makedirs(_download_base, exist_ok=True)
 
+import logging
 # ─── set up root logger ───
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -146,11 +148,10 @@ async def run_kgb(update, context, alias, from_dt=None, to_dt=None):
     _active[profile]            = True
     _profile_assignments[alias] = profile
 
-    # spawn the worker with the existing driver
-    alias_folder = os.path.join(_download_base, alias)
-    os.makedirs(alias_folder, exist_ok=True)
+    # use the profile’s dedicated download folder
+    download_folder = _profile_downloads[profile]
 
-    # 1) Pass download_folder into the worker
+    # spawn the worker with the existing driver + its profile download folder
     worker = KGBWorker(
         bot=context.bot,
         chat_id=update.effective_chat.id,
@@ -158,17 +159,8 @@ async def run_kgb(update, context, alias, from_dt=None, to_dt=None):
         cred=cred,
         loop=asyncio.get_running_loop(),
         driver=driver,
-        download_folder=alias_folder,   # ← now the worker knows its dir
+        download_folder=download_folder,
         profile_dir=profile,
-    )
-
-    # 2) Then *also* tell Chrome where to dump files
-    driver.execute_cdp_cmd(
-        "Browser.setDownloadBehavior",
-        {
-            "behavior":     "allow",
-            "downloadPath": os.path.abspath(alias_folder)
-        }
     )
 
     # attach custom dates if provided
@@ -184,6 +176,7 @@ async def run_kgb(update, context, alias, from_dt=None, to_dt=None):
     if from_dt:
         msg += f" from {from_dt.strftime('%d/%m/%Y')} to {to_dt.strftime('%d/%m/%Y')}"
     await msg_target.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+
 
 async def kgb_button(update, context):
     """CallbackQueryHandler for “Default / Custom” buttons."""
@@ -1364,7 +1357,11 @@ class IOBWorker(threading.Thread):
             pass
         finally:
             self.stop_evt.set()
+            # 5) pop the profile assignment, return it to the pool, and mark inactive
             profile = _profile_assignments.pop(self.alias, None)
+            if profile:
+                _free_profiles.append(profile)
+                _active[profile] = False
             # only quit again if necessary
             if not self.reused_driver:
                 try:
@@ -1400,6 +1397,11 @@ class IOBWorker(threading.Thread):
                 self.driver.close()
             # switch to the remaining AutoBank tab
             self.driver.switch_to.window(self.driver.window_handles[0])
+            # 5) pop the profile assignment, return it to the pool, and mark inactive
+            profile = _profile_assignments.pop(self.alias, None)
+            if profile:
+                _free_profiles.append(profile)
+                _active[profile] = False            
         else:
             try:
                 self.driver.quit()
@@ -1418,9 +1420,9 @@ class KGBWorker(threading.Thread):
         alias,
         cred,
         loop,
-        driver: Optional[webdriver.Chrome] = None,
-        download_folder: Optional[str]      = None,
-        profile_dir: Optional[str]         = None,
+        driver: webdriver.Chrome,
+        download_folder: str,
+        profile_dir: Optional[str] = None,
     ):
         super().__init__(daemon=True)
         self.bot          = bot
@@ -1433,41 +1435,10 @@ class KGBWorker(threading.Thread):
         self.retry_count  = 0
         self.stop_evt     = threading.Event()
 
-        # ─── reuse injected Chrome if provided ───
-        self.reused_driver = driver is not None
-        if self.reused_driver:
-            self.driver       = driver
-            self.download_dir = download_folder
-            self.profile      = None
-   
-            return
-
-        # ─── otherwise, spin up a fresh Chrome instance ───
-        self.profile = profile_dir
-
-        # (A) per-alias download folder under "./downloads/<alias>"
-        download_root = os.path.join(os.getcwd(), "downloads", alias)
-        os.makedirs(download_root, exist_ok=True)
-        self.download_dir = download_root
-
-        opts = webdriver.ChromeOptions()
-        opts.add_argument(f"--user-data-dir={profile_dir}")
-        opts.add_argument("--start-maximized")
-        opts.add_argument("--no-sandbox")
-        opts.add_argument("--disable-dev-shm-usage")
-        opts.add_argument("--ignore-certificate-errors")
-        opts.add_argument("--allow-insecure-localhost")
-        opts.add_argument("--ignore-ssl-errors")
-
-        # (B) keep your prefs for download
-        prefs = {
-            "download.default_directory": download_root,
-            "download.prompt_for_download": False,
-            "profile.default_content_setting_values.automatic_downloads": 1,
-        }
-        opts.add_experimental_option("prefs", prefs)
-
-        self.driver = webdriver.Chrome(options=opts)
+        # ─── always use the injected driver ───
+        assert driver, "KGBWorker requires a Chrome driver instance"
+        self.driver       = driver
+        self.download_dir = download_folder
 
     def _retry(self):
         """Cycle to a fresh tab, close the old ones, reset state—no login here."""
@@ -2144,74 +2115,61 @@ class KGBWorker(threading.Thread):
         #self._send(f"Balance (after upload): {updated_balance}")
 
     def stop(self):
-        # signal the worker to halt
+        """
+        Gracefully stop the KGB worker:
+          1) signal halt
+          2) perform logout if logged in
+          3) capture diagnostics screenshots
+          4) recycle the shared Chrome: close old tabs, open a fresh AutoBank tab
+          5) pop the profile assignment, return it to the pool, and mark inactive
+        """
+        # 1) signal halt
         self.stop_evt.set()
 
-        # if logged in, perform logout sequence
+        # 2) if already logged in, log out
         if self.logged_in:
             try:
                 self._logout()
             except Exception:
                 pass
 
-        # capture screenshots for diagnostics
+        # 3) capture screenshots for diagnostics
         try:
             self._screenshot_tabs()
         except Exception:
             pass
 
-        if self.reused_driver:
-            # recycle the shared browser: open a fresh AutoBank tab, close the rest
-            self.driver.switch_to.window(self.driver.window_handles[0])
-            self.driver.execute_script(
-                "window.open('https://autobank.payatom.in/operator_index.php');"
-            )
-            for h in self.driver.window_handles[:-1]:
-                self.driver.switch_to.window(h)
-                self.driver.close()
-            self.driver.switch_to.window(self.driver.window_handles[0])
-        else:
-            try:
-                self.driver.quit()
-            except Exception:
-                pass
+        # 4) recycle the shared browser
+        self.driver.switch_to.window(self.driver.window_handles[0])
+        self.driver.execute_script(
+            "window.open('https://autobank.payatom.in/operator_index.php');"
+        )
+        for handle in self.driver.window_handles[:-1]:
+            self.driver.switch_to.window(handle)
+            self.driver.close()
+        self.driver.switch_to.window(self.driver.window_handles[0])
+
+        # 5) pop the profile assignment, return it to the pool, and mark inactive
+        profile = _profile_assignments.pop(self.alias, None)
+        if profile:
+            _free_profiles.append(profile)
+            _active[profile] = False
     
+
     def _logout(self):
         """
-        Log out from KGB (handling session-expired pages), then quit if needed.
+        Log out from KGB, then signal stop.
         """
         try:
             self.stop_evt.set()
+            # switch back to the KGB tab
             self.driver.switch_to.window(self.kgb_win)
-
-            if "Session Expired" in self.driver.title or "Application Security Error" in self.driver.page_source:
-                WebDriverWait(self.driver, 5).until(
-                    EC.element_to_be_clickable((By.XPATH,
-                        "//span[contains(@onclick, 'AuthenticationController') and contains(., 'Go to Login Page')]"
-                    ))
-                ).click()
-                time.sleep(2)
-
-            try:
-                logout_icon = WebDriverWait(self.driver, 5).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR,
-                        "i.power-off, a[title='Logout'], button[title='Logout']"
-                    ))
-                )
-                logout_icon.click()
-            except TimeoutException:
-                pass
 
             self._send("🚪 Logged out of KGB.")
         except Exception:
             pass
         finally:
-            # only quit the browser if this worker created it
-            if not getattr(self, "reused_driver", False):
-                try:
-                    self.driver.quit()
-                except:
-                    pass
+            # signal stop but do not quit the shared driver
             self.stop_evt.set()
 
 
@@ -3058,25 +3016,43 @@ from telegram.ext import ContextTypes
 async def on_startup(app: Application) -> None:
     await app.bot.delete_webhook(drop_pending_updates=True)
 
-    # 1) Launch one Chrome window per profile dir (max 10)
-    for profile in _free_profiles:   # your existing list of 10 profile-dirs
+    # ensure base download directory exists
+    os.makedirs(_download_base, exist_ok=True)
+
+    # Launch one Chrome window per profile dir, each with its own download folder
+    for profile in _free_profiles:
+        # a) create a download folder named for this profile
+        prof_name = os.path.basename(profile)
+        download_folder = os.path.join(_download_base, prof_name)
+        os.makedirs(download_folder, exist_ok=True)
+        _profile_downloads[profile] = download_folder
+
+        # b) start Chrome with that profile
         opts = webdriver.ChromeOptions()
         opts.add_argument(f"--user-data-dir={profile}")
         opts.add_argument("--no-sandbox")
         opts.add_argument("--disable-dev-shm-usage")
-                # (B) keep your prefs for download
-        prefs = {
-            "download.prompt_for_download": False,
-            "profile.default_content_setting_values.automatic_downloads": 1,
-        }
-        opts.add_experimental_option("prefs", prefs)
+        opts.add_argument("--incognito")
         driver = webdriver.Chrome(options=opts)
-        driver.get("https://autobank.payatom.in/operator_index.php")
+
+        # c) instruct Chrome to dump all downloads into our profile folder
+        driver.execute_cdp_cmd(
+            "Browser.setDownloadBehavior",
+            {"behavior": "allow", "downloadPath": download_folder}
+        )
+
+        # track driver and its state
         _drivers[profile] = driver
         _active[profile] = False
+
+        # prompt user to log in
         await app.bot.send_message(
             chat_id=config.TELEGRAM_CHAT_ID,
-            text=f"🔐 Please log in to AutoBank now in Chrome profile:\n`{profile}`",
+            text=(
+                f"🔐 Please log in to AutoBank now in Chrome profile:\n"
+                f"`{profile}`\n"
+                f"Downloads will go to `{download_folder}`"
+            ),
             parse_mode=ParseMode.MARKDOWN,
         )
 
@@ -3318,57 +3294,50 @@ async def run_alias(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if alias not in creds:
         return await update.message.reply_text(f"❌ Unknown alias “{alias}”.")
-
-    # pick suffix
+    # pick the appropriate worker based on suffix
     for suffix, cls in _WORKER_CLASSES.items():
         if alias.endswith(f"_{suffix}"):
             WorkerClass = cls
             break
     else:
         return await update.message.reply_text(
-            "❌ Alias must end in _tmb, _iob, _iobcorp or _kgb"
+            "❌ Alias must end in _tmb, _iob, _iobcorp, _idbi, _idfc or _kgb"
         )
 
     if alias in _profile_assignments:
         return await update.message.reply_text(f"❌ Already running “{alias}”.")
-
     if not _free_profiles:
         return await update.message.reply_text(
             "❌ Maximum of 10 concurrent sessions reached."
         )
-    #NEW!
-    # 1) Reserve a profile and grab its Chrome driver
+
+    # Reserve a profile and grab its Chrome driver
     profile = _free_profiles.pop(0)
     _profile_assignments[alias] = profile
     driver = _drivers[profile]
     _active[profile] = True
 
-    # 2) Collapse to a single AutoBank tab
+    # Collapse to a single AutoBank tab
     main_handle = driver.window_handles[0]
     for handle in driver.window_handles[1:]:
         driver.switch_to.window(handle)
         driver.close()
     driver.switch_to.window(main_handle)
 
-    # 3) Override download folder for this alias
-    alias_folder = os.path.join(_download_base, alias)
-    os.makedirs(alias_folder, exist_ok=True)
-    driver.execute_cdp_cmd(
-        "Page.setDownloadBehavior",
-        {"behavior": "allow", "downloadPath": alias_folder}
-    )
+    # Use the profile’s dedicated download folder set at startup
+    download_folder = _profile_downloads[profile]
 
-    # 4) Start the worker using the existing driver
-    cred = creds[alias]
+    # Spawn the worker with the existing driver and download folder
     loop = asyncio.get_running_loop()
     worker = WorkerClass(
         bot=context.bot,
         chat_id=update.effective_chat.id,
         alias=alias,
-        cred=cred,
+        cred=creds[alias],
         loop=loop,
         driver=driver,
-        download_folder=alias_folder,
+        download_folder=download_folder,
+        profile_dir=profile,
     )
     workers[alias] = worker
     worker.start()
@@ -3377,6 +3346,7 @@ async def run_alias(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Started *{alias}* using profile `{os.path.basename(profile)}`",
         parse_mode=ParseMode.MARKDOWN,
     )
+
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"[KGB TEXT ENTRY] hit handle_text_message, pending_kgb global is {pending_kgb}")    
