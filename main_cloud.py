@@ -1870,13 +1870,28 @@ class KGBWorker(threading.Thread):
         #self.driver.save_screenshot("step1_search.png")
         #print("STEP 1: Screenshot saved as step1_search.png")
         # THIS is the magic that actually routes downloads without a dialog:
-        driver.execute_cdp_cmd(
+        # assume self.driver is your WebDriver instance
+        # and self.download_dir was injected at init
+
+        # 1. set the Chrome prefs as you already do…
+        prefs = {
+            "download.prompt_for_download": False,
+            "download.default_directory": self.download_dir,
+            "download.directory_upgrade": True,
+            "profile.default_content_settings.popups": 0,
+            "safebrowsing.enabled": True
+        }
+        self.options.add_experimental_option("prefs", prefs)
+
+        # 2. execute the CDP command using that same path:
+        self.driver.execute_cdp_cmd(
             "Page.setDownloadBehavior",
             {
-                "behavior": "allow",        # allow all downloads
-                "downloadPath": download_folder 
+                "behavior": "allow",
+                "downloadPath": self.download_dir
             }
         )
+
         # Wait for the hidden <select> to exist (so we know the widget is rendered):
         WebDriverWait(self.driver, 60).until(
             EC.presence_of_element_located(
