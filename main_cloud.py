@@ -3065,6 +3065,12 @@ async def on_startup(app: Application) -> None:
         opts.add_argument("--no-sandbox")
         opts.add_argument("--disable-dev-shm-usage")
         opts.add_argument("--incognito")
+                # (B) keep your prefs for download
+        prefs = {
+            "download.prompt_for_download": False,
+            "profile.default_content_setting_values.automatic_downloads": 1,
+        }
+        opts.add_experimental_option("prefs", prefs)
         driver = webdriver.Chrome(options=opts)
         driver.get("https://autobank.payatom.in/operator_index.php")
         _drivers[profile] = driver
