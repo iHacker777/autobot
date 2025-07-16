@@ -858,6 +858,7 @@ class TMBWorker(threading.Thread):
 
                 # Success!
                 self._send_msg(f"✅ AutoBank upload succeeded (attempt {attempt}/{max_attempts})")
+                self._send(f"[DEBUG] XLS path: {statement_path})")
                 break
 
             except Exception as e:
@@ -1264,6 +1265,7 @@ class IOBWorker(threading.Thread):
                 )
 
                 self._send(f"✅ AutoBank upload succeeded on attempt {attempt}/{max_attempts}")
+                self._send(f"[DEBUG] XLS path: {csv_path})")
                 break
 
             except Exception as e:
@@ -2652,6 +2654,7 @@ class IDBIWorker(threading.Thread):
                 # f) Wait for success
                 wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, ".swal2-icon-success")))
                 self._send(f"✅ AutoBank upload succeeded (attempt {attempt}/{max_attempts})")
+                self._send(f"[DEBUG] XLS path: {statement_path})")
                 break
 
             except Exception as e:
@@ -2944,6 +2947,7 @@ class IDFCWorker(threading.Thread):
                 )
 
                 self._send(f"✅ AutoBank upload succeeded (attempt {attempt}/{max_attempts})")
+                self._send(f"[DEBUG] XLS path: {xls_path})")
                 break
 
             except Exception as e:
