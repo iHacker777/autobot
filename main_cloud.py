@@ -1199,7 +1199,9 @@ class IOBWorker(threading.Thread):
                     download_dir,
                     max(files, key=lambda f: os.path.getctime(os.path.join(download_dir, f)))
                 )
+                self._send(f"[DEBUG1] XLS path: {csv_path})")
                 break
+            self._send(f"[DEBUG2] XLS path: {csv_path})")
             time.sleep(1)
         if not csv_path:
             raise TimeoutException("Timed out waiting for IOB CSV download")
@@ -3037,6 +3039,13 @@ async def on_startup(app: Application) -> None:
         opts.add_argument(f"--user-data-dir={profile}")
         opts.add_argument("--no-sandbox")
         opts.add_argument("--disable-dev-shm-usage")
+        # ─── (B) ─── Give Chrome a unique download.default_directory ───
+        prefs = {
+            "download.default_directory": download_folder,
+            "download.prompt_for_download": False,
+            "profile.default_content_setting_values.automatic_downloads": 1,
+        }
+        opts.add_experimental_option("prefs", prefs)
         driver = webdriver.Chrome(options=opts)
 
         # c) instruct Chrome to dump all downloads into our profile folder
