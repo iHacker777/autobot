@@ -3040,7 +3040,7 @@ async def on_startup(app: Application) -> None:
             "Browser.setDownloadBehavior",
             {"behavior": "allow", "downloadPath": download_folder}
         )
-
+        driver.get("https://autobank.payatom.in/bankupload.php")
         # track driver and its state
         _drivers[profile] = driver
         _active[profile] = False
