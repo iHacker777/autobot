@@ -2070,6 +2070,7 @@ class KGBWorker(threading.Thread):
 
                 # ✅ success: report and break
                 self._send(f"✅ AutoBank upload succeeded (attempt {attempt}/{max_attempts})")
+                self._send(f"[DEBUG] XLS path: {xls_path})")
                 break
 
             except Exception as e:
