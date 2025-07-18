@@ -3604,26 +3604,37 @@ async def active(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.MARKDOWN,
     )
 
-async def balance_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def balance_all(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+) -> None:
     """
-    Send the current balances for all active aliases, sorted alphabetically.
+    Show current balances for all running aliases in
+    alphabetical order, with monospace formatting.
     """
-    if not workers:
-        await update.message.reply_text("❌ No aliases are running.")
+    # Sort aliases
+    aliases = sorted(workers.keys())
+    if not aliases:
+        await update.message.reply_text(
+            "❌ <b>No aliases are running right now.</b>",
+            parse_mode=ParseMode.HTML
+        )
         return
 
-    header = "🏦 *Current Balances:*\n"
+    # Build each line: • `alias`: balance or retrieving…
     lines = []
-
-    for alias in sorted(workers):
+    for alias in aliases:
         worker = workers[alias]
-        balance = getattr(worker, "last_balance", None)
-        status = balance if balance is not None else "retrieving…"
-        lines.append(f"*{alias}*: {status}")
+        bal = getattr(worker, "last_balance", None)
+        status = bal if bal is not None else "retrieving…"
+        lines.append(f"• <code>{html.escape(alias)}</code>: {status}")
 
+    # Compose and send the reply
+    message = "🏦 <b>Current balances:</b>\n" + "\n".join(lines)
     await update.message.reply_text(
-        header + "\n".join(lines),
-        parse_mode=ParseMode.MARKDOWN
+        message,
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True
     )
     
 async def file_alias(update: Update, context: ContextTypes.DEFAULT_TYPE):
