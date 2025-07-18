@@ -3280,14 +3280,26 @@ If you hit any edge–case, drop a message here in the dev chat.
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🤖 TMB automation bot.\nUse /list to see aliases."
+        "🤖 Payatom automation bot.\nUse /list to see aliases."
     )
 
 
-async def list_aliases(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    txt = "\n".join(f"- {a}" for a in creds)
-    await update.message.reply_text(f"Available aliases:\n{txt}")
+async def list_aliases(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Display all configured aliases in alphabetical order.
+    """
+    if not creds:
+        await update.message.reply_text("ℹ️ No aliases are currently configured.")
+        return
 
+    sorted_aliases = sorted(creds)
+    formatted_list = "\n".join(f"• {alias}" for alias in sorted_aliases)
+    header = "📝 *Available Aliases:*\n"
+
+    await update.message.reply_text(
+        header + formatted_list,
+        parse_mode=ParseMode.MARKDOWN
+    )
 
 async def run_alias(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -3592,20 +3604,28 @@ async def active(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.MARKDOWN,
     )
 
-async def balance_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def balance_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Send the current balances for all active aliases, sorted alphabetically.
+    """
     if not workers:
-        return await update.message.reply_text("❌ No aliases are running right now.")
+        await update.message.reply_text("❌ No aliases are running.")
+        return
+
+    header = "🏦 *Current Balances:*\n"
     lines = []
-    for alias, w in workers.items():
-        bal = getattr(w, "last_balance", None)
-        if bal:
-            lines.append(f"*{alias}*: {bal}")
-        else:
-            lines.append(f"*{alias}*: retrieving…")
+
+    for alias in sorted(workers):
+        worker = workers[alias]
+        balance = getattr(worker, "last_balance", None)
+        status = balance if balance is not None else "retrieving…"
+        lines.append(f"*{alias}*: {status}")
+
     await update.message.reply_text(
-        "🏦 *Current balances:*\n" + "\n".join(lines),
+        header + "\n".join(lines),
         parse_mode=ParseMode.MARKDOWN
     )
+    
 async def file_alias(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 1️⃣ Parse & validate
     alias = context.args[0] if context.args else None
